@@ -36,35 +36,93 @@ public class SeleniumEndToEndTest {
     @BeforeEach
     public void setup() {
         ChromeOptions options = new ChromeOptions();
-        // Retirer headless pour voir le navigateur
-        // options.addArguments("--headless");
-        options.addArguments("--no-sandbox");
-        options.addArguments("--disable-dev-shm-usage");
-        options.addArguments("--start-maximized");
         
-        driver = new ChromeDriver(options);
-        driver.manage().window().maximize();
-        wait = new WebDriverWait(driver, Duration.ofSeconds(10));
-        baseUrl = "http://localhost:" + port;
+        // ========================================
+        // DÉTECTION AUTOMATIQUE DE L'ENVIRONNEMENT
+        // ========================================
+        boolean isCI = System.getenv("CI") != null || 
+                       System.getenv("AGENT_NAME") != null ||  // Azure DevOps
+                       System.getenv("JENKINS_HOME") != null || // Jenkins
+                       System.getenv("GITHUB_ACTIONS") != null; // GitHub Actions
+        
+        if (isCI) {
+            // ====================================
+            // MODE CI/CD - HEADLESS
+            // ====================================
+            System.out.println("🤖 Mode CI/CD détecté - Configuration headless");
+            options.addArguments("--headless=new");          // Nouveau mode headless (Chrome 109+)
+            options.addArguments("--no-sandbox");             // Évite problèmes de permissions
+            options.addArguments("--disable-dev-shm-usage");  // Évite problèmes mémoire partagée
+            options.addArguments("--disable-gpu");            // Désactive GPU
+            options.addArguments("--window-size=1920,1080");  // Taille fixe
+            options.addArguments("--disable-extensions");
+            options.addArguments("--proxy-server='direct://'");
+            options.addArguments("--proxy-bypass-list=*");
+            options.addArguments("--disable-software-rasterizer");
+            options.addArguments("--disable-background-networking");
+            options.addArguments("--disable-default-apps");
+            options.addArguments("--disable-sync");
+            options.addArguments("--metrics-recording-only");
+            options.addArguments("--mute-audio");
+            options.addArguments("--no-first-run");
+            options.addArguments("--safebrowsing-disable-auto-update");
+            options.addArguments("--ignore-certificate-errors");
+            options.addArguments("--disable-blink-features=AutomationControlled");
+            options.addArguments("--remote-debugging-port=9222"); // Pour debug si besoin
+        } else {
+            // ====================================
+            // MODE LOCAL - NAVIGATEUR VISIBLE
+            // ====================================
+            System.out.println("🖥️  Mode local détecté - Navigateur visible");
+            options.addArguments("--start-maximized");
+            options.addArguments("--disable-blink-features=AutomationControlled");
+        }
+        
+        // Options communes
+        options.addArguments("--disable-notifications");
+        options.addArguments("--disable-popup-blocking");
+        
+        try {
+            driver = new ChromeDriver(options);
+            driver.manage().window().maximize();
+            wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+            baseUrl = "http://localhost:" + port;
+            
+            System.out.println("✅ WebDriver initialisé - URL: " + baseUrl);
+        } catch (Exception e) {
+            System.err.println("❌ Erreur lors de l'initialisation du WebDriver: " + e.getMessage());
+            throw e;
+        }
     }
 
     @AfterEach
     public void teardown() {
         if (driver != null) {
-            driver.quit();
+            try {
+                driver.quit();
+                System.out.println("✅ WebDriver fermé proprement");
+            } catch (Exception e) {
+                System.err.println("⚠️  Erreur lors de la fermeture: " + e.getMessage());
+            }
         }
     }
 
     @Test
     @Order(1)
-    public void testLoginPage() throws InterruptedException {
+    public void testLoginPage() {
+        System.out.println("\n[TEST 1] 🧪 Test de la page de login");
+        
         driver.get(baseUrl + "/login");
-        Thread.sleep(1000); // Pour voir la page
-
+        
+        // Attendre que la page soit chargée
+        wait.until(ExpectedConditions.titleIs("Login"));
+        
         String pageTitle = driver.getTitle();
         assertEquals("Login", pageTitle);
 
-        WebElement usernameField = driver.findElement(By.id("username"));
+        WebElement usernameField = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.id("username"))
+        );
         WebElement passwordField = driver.findElement(By.id("password"));
         WebElement loginButton = driver.findElement(By.cssSelector("button[type='submit']"));
 
@@ -72,189 +130,209 @@ public class SeleniumEndToEndTest {
         assertNotNull(passwordField);
         assertNotNull(loginButton);
         
-        Thread.sleep(1000); // Pour voir la page
+        System.out.println("✅ Page de login OK");
     }
 
     @Test
     @Order(2)
-    public void testSuccessfulLogin() throws InterruptedException {
+    public void testSuccessfulLogin() {
+        System.out.println("\n[TEST 2] 🔐 Test de login réussi");
+        
         driver.get(baseUrl + "/login");
-        Thread.sleep(1000);
 
-        WebElement usernameField = driver.findElement(By.id("username"));
+        WebElement usernameField = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.id("username"))
+        );
         WebElement passwordField = driver.findElement(By.id("password"));
 
         usernameField.sendKeys("admin");
-        Thread.sleep(500);
-        
         passwordField.sendKeys("admin");
-        Thread.sleep(500);
 
         WebElement loginButton = driver.findElement(By.cssSelector("button[type='submit']"));
         loginButton.click();
 
         // Attendre la redirection vers /products
         wait.until(ExpectedConditions.urlContains("/products"));
-        Thread.sleep(1000);
 
         String currentUrl = driver.getCurrentUrl();
         assertTrue(currentUrl.contains("/products"));
+        
+        System.out.println("✅ Login réussi, redirection OK");
     }
 
     @Test
     @Order(3)
-    public void testProductListPage() throws InterruptedException {
-        // Login d'abord
+    public void testProductListPage() {
+        System.out.println("\n[TEST 3] 📋 Test de la page liste des produits");
+        
         login();
-        Thread.sleep(1000);
 
-        // Vérifier que nous sommes sur la page des produits
+        // Vérifier le titre
+        wait.until(ExpectedConditions.titleIs("Products List"));
         String pageTitle = driver.getTitle();
         assertEquals("Products List", pageTitle);
 
         // Vérifier la présence du tableau
-        WebElement table = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
+        WebElement table = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.id("products-table"))
+        );
         assertNotNull(table);
-        Thread.sleep(1000);
 
         // Vérifier qu'il y a des produits
-        List<WebElement> rows = driver.findElements(By.cssSelector("#products-table tbody tr"));
+        List<WebElement> rows = driver.findElements(
+            By.cssSelector("#products-table tbody tr")
+        );
         assertTrue(rows.size() > 0, "Il devrait y avoir des produits dans la liste");
         
-        Thread.sleep(1000);
+        System.out.println("✅ Liste des produits OK - " + rows.size() + " produit(s)");
     }
 
     @Test
     @Order(4)
-    public void testCreateNewProduct() throws InterruptedException {
+    public void testCreateNewProduct() {
+        System.out.println("\n[TEST 4] ➕ Test de création d'un produit");
+        
         login();
-        Thread.sleep(1000);
 
         // Cliquer sur "Add New Product"
-        WebElement addButton = driver.findElement(By.id("add-product-btn"));
+        WebElement addButton = wait.until(
+            ExpectedConditions.elementToBeClickable(By.id("add-product-btn"))
+        );
         addButton.click();
-        Thread.sleep(1000);
 
         // Attendre d'être sur la page de création
         wait.until(ExpectedConditions.urlContains("/products/new"));
 
         // Remplir le formulaire
-        WebElement nameField = driver.findElement(By.id("name"));
+        WebElement nameField = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.id("name"))
+        );
         WebElement descriptionField = driver.findElement(By.id("description"));
         WebElement priceField = driver.findElement(By.id("price"));
         WebElement quantityField = driver.findElement(By.id("quantity"));
 
-        nameField.sendKeys("Test Product");
-        Thread.sleep(500);
-        
+        nameField.sendKeys("Test Product " + System.currentTimeMillis());
         descriptionField.sendKeys("This is a test product");
-        Thread.sleep(500);
-        
         priceField.sendKeys("99.99");
-        Thread.sleep(500);
-        
         quantityField.sendKeys("15");
-        Thread.sleep(1000);
 
         // Soumettre le formulaire
-        WebElement saveButton = driver.findElement(By.id("save-product-btn"));
+        WebElement saveButton = wait.until(
+            ExpectedConditions.elementToBeClickable(By.id("save-product-btn"))
+        );
         saveButton.click();
 
         // Attendre la redirection vers la liste
         wait.until(ExpectedConditions.urlContains("/products"));
         wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
-        Thread.sleep(1000);
 
         // Vérifier que le produit apparaît dans la liste
         String pageSource = driver.getPageSource();
         assertTrue(pageSource.contains("Test Product"));
         
-        Thread.sleep(1000);
+        System.out.println("✅ Produit créé avec succès");
     }
 
     @Test
     @Order(5)
-    public void testEditProduct() throws InterruptedException {
+    public void testEditProduct() {
+        System.out.println("\n[TEST 5] ✏️  Test de modification d'un produit");
+        
         login();
-        Thread.sleep(1000);
 
         // Trouver le premier bouton Edit
         WebElement editButton = wait.until(
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector("a.btn-warning"))
+            ExpectedConditions.elementToBeClickable(By.cssSelector("a.btn-warning"))
         );
         editButton.click();
-        Thread.sleep(1000);
 
         // Attendre d'être sur la page d'édition
         wait.until(ExpectedConditions.urlContains("/products/edit/"));
 
         // Modifier le nom
-        WebElement nameField = driver.findElement(By.id("name"));
+        WebElement nameField = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.id("name"))
+        );
         nameField.clear();
-        Thread.sleep(500);
-        
-        nameField.sendKeys("Updated Product");
-        Thread.sleep(1000);
+        nameField.sendKeys("Updated Product " + System.currentTimeMillis());
 
         // Soumettre
-        WebElement updateButton = driver.findElement(By.cssSelector("button.btn-primary"));
+        WebElement updateButton = wait.until(
+            ExpectedConditions.elementToBeClickable(By.cssSelector("button.btn-primary"))
+        );
         updateButton.click();
 
         // Attendre la redirection
         wait.until(ExpectedConditions.urlContains("/products"));
         wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
-        Thread.sleep(1000);
 
         // Vérifier que le produit a été modifié
         String pageSource = driver.getPageSource();
         assertTrue(pageSource.contains("Updated Product"));
         
-        Thread.sleep(1000);
+        System.out.println("✅ Produit modifié avec succès");
     }
 
     @Test
     @Order(6)
-    public void testDeleteProduct() throws InterruptedException {
+    public void testDeleteProduct() {
+        System.out.println("\n[TEST 6] 🗑️  Test de suppression d'un produit");
+        
         login();
-        Thread.sleep(1000);
 
         // Compter le nombre de produits avant suppression
-        List<WebElement> rowsBefore = driver.findElements(By.cssSelector("#products-table tbody tr"));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
+        List<WebElement> rowsBefore = driver.findElements(
+            By.cssSelector("#products-table tbody tr")
+        );
         int countBefore = rowsBefore.size();
-        Thread.sleep(500);
+        System.out.println("Nombre de produits avant suppression: " + countBefore);
 
         // Trouver et cliquer sur le premier bouton Delete
-        WebElement deleteButton = driver.findElement(By.cssSelector("button.btn-danger"));
+        WebElement deleteButton = wait.until(
+            ExpectedConditions.elementToBeClickable(By.cssSelector("button.btn-danger"))
+        );
         deleteButton.click();
-        Thread.sleep(500);
 
-        // Accepter l'alerte de confirmation
+        // Attendre et accepter l'alerte de confirmation
+        wait.until(ExpectedConditions.alertIsPresent());
         driver.switchTo().alert().accept();
-        Thread.sleep(1000);
 
         // Attendre le rechargement de la page
         wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
-        Thread.sleep(1000);
+        
+        // Petite pause pour que le DOM se mette à jour
+        wait.until(driver2 -> {
+            List<WebElement> rows = driver.findElements(
+                By.cssSelector("#products-table tbody tr")
+            );
+            return rows.size() == countBefore - 1;
+        });
 
         // Vérifier que le nombre de produits a diminué
-        List<WebElement> rowsAfter = driver.findElements(By.cssSelector("#products-table tbody tr"));
+        List<WebElement> rowsAfter = driver.findElements(
+            By.cssSelector("#products-table tbody tr")
+        );
         int countAfter = rowsAfter.size();
         
-        assertEquals(countBefore - 1, countAfter, "Le nombre de produits devrait avoir diminué de 1");
+        assertEquals(countBefore - 1, countAfter, 
+            "Le nombre de produits devrait avoir diminué de 1");
         
-        Thread.sleep(1000);
+        System.out.println("✅ Produit supprimé - Nombre restant: " + countAfter);
     }
 
     @Test
     @Order(7)
-    public void testLogout() throws InterruptedException {
+    public void testLogout() {
+        System.out.println("\n[TEST 7] 🚪 Test de déconnexion");
+        
         login();
-        Thread.sleep(1000);
 
         // Cliquer sur Logout
-        WebElement logoutButton = driver.findElement(By.cssSelector("button.btn-secondary"));
+        WebElement logoutButton = wait.until(
+            ExpectedConditions.elementToBeClickable(By.cssSelector("button.btn-secondary"))
+        );
         logoutButton.click();
-        Thread.sleep(1000);
 
         // Attendre d'être redirigé vers la page de login
         wait.until(ExpectedConditions.urlContains("/login"));
@@ -262,68 +340,74 @@ public class SeleniumEndToEndTest {
         String currentUrl = driver.getCurrentUrl();
         assertTrue(currentUrl.contains("/login"));
         
-        Thread.sleep(1000);
+        System.out.println("✅ Déconnexion réussie");
     }
 
     @Test
     @Order(8)
-    public void testCompleteWorkflow() throws InterruptedException {
-        // Test complet du workflow
-        System.out.println("=== Début du test complet ===");
+    public void testCompleteWorkflow() {
+        System.out.println("\n[TEST 8] 🎯 Test du workflow complet");
+        System.out.println("========================================");
         
         // 1. Login
         driver.get(baseUrl + "/login");
-        Thread.sleep(1000);
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.id("username")));
         driver.findElement(By.id("username")).sendKeys("admin");
-        Thread.sleep(500);
         driver.findElement(By.id("password")).sendKeys("admin");
-        Thread.sleep(500);
         driver.findElement(By.cssSelector("button[type='submit']")).click();
         wait.until(ExpectedConditions.urlContains("/products"));
-        Thread.sleep(1000);
-        System.out.println("✓ Login réussi");
+        System.out.println("  ✓ Login réussi");
 
         // 2. Voir la liste
         wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
-        Thread.sleep(1000);
-        System.out.println("✓ Liste des produits affichée");
+        System.out.println("  ✓ Liste des produits affichée");
 
         // 3. Créer un nouveau produit
-        driver.findElement(By.id("add-product-btn")).click();
-        Thread.sleep(1000);
-        driver.findElement(By.id("name")).sendKeys("Final Test Product");
-        Thread.sleep(500);
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("add-product-btn"))).click();
+        wait.until(ExpectedConditions.urlContains("/products/new"));
+        
+        String productName = "Final Test Product " + System.currentTimeMillis();
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.id("name")))
+            .sendKeys(productName);
         driver.findElement(By.id("description")).sendKeys("Description du test final");
-        Thread.sleep(500);
         driver.findElement(By.id("price")).sendKeys("149.99");
-        Thread.sleep(500);
         driver.findElement(By.id("quantity")).sendKeys("25");
-        Thread.sleep(1000);
-        driver.findElement(By.id("save-product-btn")).click();
+        
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("save-product-btn"))).click();
         wait.until(ExpectedConditions.urlContains("/products"));
-        Thread.sleep(1000);
-        System.out.println("✓ Nouveau produit créé");
+        System.out.println("  ✓ Nouveau produit créé: " + productName);
 
         // 4. Vérifier que le produit existe
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.id("products-table")));
         String pageSource = driver.getPageSource();
         assertTrue(pageSource.contains("Final Test Product"));
-        Thread.sleep(1000);
-        System.out.println("✓ Produit visible dans la liste");
+        System.out.println("  ✓ Produit visible dans la liste");
 
         // 5. Logout
-        driver.findElement(By.cssSelector("button.btn-secondary")).click();
+        wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector("button.btn-secondary")
+        )).click();
         wait.until(ExpectedConditions.urlContains("/login"));
-        Thread.sleep(1000);
-        System.out.println("✓ Logout réussi");
+        System.out.println("  ✓ Logout réussi");
         
-        System.out.println("=== Test complet terminé avec succès ===");
+        System.out.println("========================================");
+        System.out.println("✅ Test complet terminé avec succès");
     }
 
+    // ========================================
+    // MÉTHODE UTILITAIRE
+    // ========================================
     private void login() {
         driver.get(baseUrl + "/login");
-        driver.findElement(By.id("username")).sendKeys("admin");
+        
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.id("username")))
+            .sendKeys("admin");
         driver.findElement(By.id("password")).sendKeys("admin");
-        driver.findElement(By.cssSelector("button[type='submit']")).click();
+        
+        wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector("button[type='submit']")
+        )).click();
+        
         wait.until(ExpectedConditions.urlContains("/products"));
     }
 }
