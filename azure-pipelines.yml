@@ -1,8 +1,6 @@
 trigger:
-  branches:
-    include:
-      - main
-      - develop
+  - main
+  - develop
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -12,67 +10,105 @@ variables:
   MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
 
 stages:
-  - stage: Test
+  - stage: BuildAndTest
+    displayName: 'Build & Test'
     jobs:
       - job: SeleniumTests
-        displayName: 'Selenium End-to-End Tests'
+        displayName: 'Selenium E2E Tests'
+        
         steps:
+          # Checkout
+          - checkout: self
+            displayName: 'Checkout code'
+          
+          # Installation Chrome
+          - script: |
+              wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+              sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+              sudo apt-get update
+              sudo apt-get install -y google-chrome-stable
+              google-chrome --version
+            displayName: 'Install Chrome'
+          
+          # Créer le dossier Maven AVANT le cache
+          - script: |
+              mkdir -p $(MAVEN_CACHE_FOLDER)
+              echo "Maven cache folder created: $(MAVEN_CACHE_FOLDER)"
+            displayName: 'Create Maven cache folder'
+          
+          # Cache Maven (après création du dossier)
           - task: Cache@2
+            displayName: 'Cache Maven packages'
             inputs:
               key: 'maven | "$(Agent.OS)" | **/pom.xml'
               restoreKeys: |
                 maven | "$(Agent.OS)"
                 maven
               path: $(MAVEN_CACHE_FOLDER)
-            displayName: 'Cache Maven packages'
-
+            continueOnError: true  # Ne pas bloquer si le cache échoue
+          
+          # Build (sans tests)
           - task: Maven@3
+            displayName: 'Maven Clean Package'
             inputs:
               mavenPomFile: 'pom.xml'
-              goals: 'clean compile'
-              options: '-DskipTests'
+              goals: 'clean package'
+              options: '-DskipTests $(MAVEN_OPTS)'
               javaHomeOption: 'JDKVersion'
-              jdkVersionOption: '17'
+              jdkVersionOption: '1.17'
               mavenVersionOption: 'Default'
-            displayName: 'Maven Compile'
-
-          - script: |
-              sudo apt-get update
-              sudo apt-get install -y wget unzip
-              wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-              sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
-              google-chrome --version
-            displayName: 'Install Chrome'
-
-          - script: |
-              export DISPLAY=:99
-              sudo Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
-              sleep 3
-            displayName: 'Start Xvfb'
-
+              publishJUnitResults: false
+          
+          # Tests Selenium
           - task: Maven@3
+            displayName: 'Run Selenium Tests'
             inputs:
               mavenPomFile: 'pom.xml'
               goals: 'test'
-              options: '-Dtest=SeleniumEndToEndTest'
-              testResultsFiles: '**/TEST-*.xml'
+              options: '$(MAVEN_OPTS)'
               javaHomeOption: 'JDKVersion'
-              jdkVersionOption: '17'
+              jdkVersionOption: '1.17'
               mavenVersionOption: 'Default'
-            displayName: 'Run Selenium Tests'
+              publishJUnitResults: false  # On le fait manuellement après
             continueOnError: true
-
+            env:
+              CI: 'true'
+              AGENT_NAME: $(Agent.Name)
+          
+          # Publication des résultats JUnit
           - task: PublishTestResults@2
+            displayName: 'Publish JUnit Test Results'
+            condition: always()
             inputs:
               testResultsFormat: 'JUnit'
-              testResultsFiles: '**/TEST-*.xml'
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              mergeTestResults: true
               failTaskOnFailedTests: true
               testRunTitle: 'Selenium E2E Tests'
-            displayName: 'Publish Test Results'
-
+          
+          # Publication du rapport HTML Surefire
           - task: PublishBuildArtifacts@1
+            displayName: 'Publish Surefire HTML Reports'
             condition: always()
             inputs:
               PathtoPublish: '$(System.DefaultWorkingDirectory)/target/surefire-reports'
-              ArtifactName: 'test-reports'
-            displayName: 'Publish Test Reports'
+              ArtifactName: 'test-reports-surefire'
+              publishLocation: 'Container'
+          
+          # Publication des screenshots (si échecs)
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Screenshots'
+            condition: failed()
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/target/screenshots'
+              ArtifactName: 'screenshots'
+              publishLocation: 'Container'
+          
+          # Publication rapport Allure
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Allure Results'
+            condition: always()
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/target/allure-results'
+              ArtifactName: 'allure-results'
+              publishLocation: 'Container'
